@@ -107,3 +107,5 @@ aside { display: grid; gap: 14px; position: sticky; top: calc(env(safe-area-inse
 .userbar { display: flex; gap: 10px; align-items: center; font-size: 13px; }
 .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .detail > .grid + .grid { margin-top: 0; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.login .card h2 { margin-bottom: 2px; }

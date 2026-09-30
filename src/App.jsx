@@ -172,32 +172,78 @@ function Todos({ tasks, readOnly, onSaved }) {
   );
 }
 
+const ALLOW_SIGNUP = import.meta.env.VITE_ALLOW_SIGNUP === "true";
+
 function Login() {
+  // mode: signin | signup | forgot
+  const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  async function send(e) {
-    e.preventDefault(); setMsg("");
-    const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: window.location.origin } });
-    if (error) setMsg(error.message); else { setSent(true); setMsg("Check your email for the sign-in link or 6-digit code."); }
+
+  async function submit(e) {
+    e.preventDefault(); setMsg(""); setBusy(true);
+    const addr = email.trim();
+    let error;
+    if (mode === "signin") {
+      ({ error } = await supabase.auth.signInWithPassword({ email: addr, password }));
+      if (error) setMsg(error.message === "Invalid login credentials" ? "Wrong email or password." : error.message);
+    } else if (mode === "signup") {
+      if (password.length < 8) { setMsg("Use at least 8 characters."); setBusy(false); return; }
+      ({ error } = await supabase.auth.signUp({ email: addr, password, options: { emailRedirectTo: window.location.origin } }));
+      if (error) setMsg(error.message);
+      else setMsg("Account created. Check your email and click the confirmation link, then sign in.");
+    } else {
+      ({ error } = await supabase.auth.resetPasswordForEmail(addr, { redirectTo: window.location.origin }));
+      setMsg(error ? error.message : "If that email has an account, a reset link is on its way.");
+    }
+    setBusy(false);
   }
-  async function verify(e) {
-    e.preventDefault(); setMsg("");
-    const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
-    if (error) setMsg(error.message);
+
+  const title = { signin: "Sign in", signup: "Create your account", forgot: "Reset your password" }[mode];
+  const cta = { signin: "Sign in", signup: "Create account", forgot: "Send reset link" }[mode];
+  return (
+    <div className="login">
+      <div><div className="label">MSc 2027</div><h1>Scholarship Desk</h1></div>
+      <form className="card" onSubmit={submit}>
+        <h2>{title}</h2>
+        <label className="label" htmlFor="login-email">Email</label>
+        <input id="login-email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+        {mode !== "forgot" && (<>
+          <label className="label" htmlFor="login-password">Password</label>
+          <input id="login-password" type="password" required minLength={mode === "signup" ? 8 : undefined}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={e => setPassword(e.target.value)} />
+        </>)}
+        <button className="btn primary" type="submit" disabled={busy}>{busy ? "Please wait…" : cta}</button>
+        {msg && <p className="muted" style={{ margin: 0 }}>{msg}</p>}
+        <div className="actions" style={{ fontSize: 13 }}>
+          {mode !== "signin" && <button type="button" className="linkbtn" onClick={() => { setMode("signin"); setMsg(""); }}>Back to sign in</button>}
+          {mode === "signin" && <button type="button" className="linkbtn" onClick={() => { setMode("forgot"); setMsg(""); }}>Forgot password?</button>}
+          {mode === "signin" && ALLOW_SIGNUP && <button type="button" className="linkbtn" onClick={() => { setMode("signup"); setMsg(""); }}>Create account</button>}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SetPassword({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState("");
+  async function submit(e) {
+    e.preventDefault();
+    if (password.length < 8) { setMsg("Use at least 8 characters."); return; }
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) setMsg(error.message); else onDone();
   }
   return (
     <div className="login">
       <div><div className="label">MSc 2027</div><h1>Scholarship Desk</h1></div>
-      <form className="card" onSubmit={sent ? verify : send}>
-        <label className="label" htmlFor="login-email">Email</label>
-        <input id="login-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" disabled={sent} />
-        {sent && (<>
-          <label className="label" htmlFor="login-code">Code from the email</label>
-          <input id="login-code" inputMode="numeric" value={code} onChange={e => setCode(e.target.value)} placeholder="123456" />
-        </>)}
-        <button className="btn primary" type="submit">{sent ? "Sign in" : "Send sign-in email"}</button>
+      <form className="card" onSubmit={submit}>
+        <h2>Choose a new password</h2>
+        <label className="label" htmlFor="new-password">New password</label>
+        <input id="new-password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} />
+        <button className="btn primary" type="submit">Save password</button>
         {msg && <p className="muted" style={{ margin: 0 }}>{msg}</p>}
       </form>
     </div>
@@ -348,11 +394,15 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!supabase);
   const [data, setData] = useState(supabase ? null : demoData);
   const [err, setErr] = useState("");
+  const [recovering, setRecovering] = useState(false);
 
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      if (event === "PASSWORD_RECOVERY") setRecovering(true);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -365,7 +415,16 @@ export default function App() {
 
   if (!authReady) return <div className="wrap"><p className="muted">Loading…</p></div>;
   if (supabase && !session) return <Login />;
+  if (recovering) return <SetPassword onDone={() => setRecovering(false)} />;
   if (err) return <div className="wrap"><div className="banner">Could not load your programs: {err}</div></div>;
+  if (data && data.programs.length === 0 && supabase) return (
+    <div className="login">
+      <div><div className="label">MSc 2027</div><h1>Scholarship Desk</h1></div>
+      <div className="card"><h2>This account has no access</h2>
+        <p className="muted" style={{ margin: 0 }}>You're signed in as {session?.user?.email}, but the desk only opens for its owner.</p>
+        <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button></div>
+    </div>
+  );
   if (!data) return <div className="wrap"><p className="muted">Loading your programs…</p></div>;
   return (
     <Desk programs={data.programs} tasks={data.tasks} readOnly={!supabase} reload={reload}
